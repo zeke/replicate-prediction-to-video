@@ -1,11 +1,15 @@
-from dotenv import load_dotenv
-load_dotenv()
-import replicate
-from urllib import request
 import argparse
+import subprocess
 
+import ffmpeg
+import replicate
+import requests
+from dotenv import load_dotenv
 
-# Get args from the command line
+# load API key from .env file
+load_dotenv()
+
+# get args from the command line
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', type=str, required=True)
 parser.add_argument('--prompt', type=str, required=True)
@@ -18,33 +22,45 @@ temp_dir = tempfile.mkdtemp()
 print("temp_dir: ", temp_dir)
 
 # start the prediction
-prediction_generator = replicate.models.get(args.model).predict(prompt=args.prompt, steps=20)
+prediction_generator = replicate.models.get(args.model).predict(prompt=args.prompt, steps=100)
 print("prediction_generator: ", prediction_generator)
+print("waiting for output from the model. This can take a bit if the model is cold...")
 
-# iterate over prediction reponses
-for url in prediction_generator:
-    print("url: ", url)
-    
-    # get extension from url
-    extension = url.split('.')[-1]
+# iterate over prediction responses
+for index, url in enumerate(prediction_generator):
+
+    # construct filename
+    prefix = str(index).zfill(4) # 0001, 0002, etc.
     uuid = url.split('/')[-2]
-    filename =  f"{uuid}.{extension}"
+    extension = url.split('.')[-1] # jpg, png, etc
+    filename = f"{temp_dir}/{prefix}_{uuid}.{extension}"
     
-    filepath = temp_dir + '/' + filename
+    # download and save the file
+    data = requests.get(url)
+    with open(filename, 'wb') as file:
+        file.write(data.content)
 
-    print("extension: ", extension)
-    print("uuid: ", uuid)
-    print("filename: ", filename)
-    print("filepath: ", filepath)
+# create video from series of images and append a reversed copy of the video
+# so it will play ping-pong style: start-to-finish-to-start
+in1 = ffmpeg.input(f"{temp_dir}/*.{extension}", pattern_type="glob", framerate=20)
+v1 = in1.video
+v2 = in1.video.filter('reverse')
+joined = ffmpeg.concat(v1, v2, v=1).node
 
-    response = request.urlretrieve(url, filename)    
-    print("response: ", response)
+# create video
+video_path = f"{temp_dir}/output.mp4"
+ffmpeg.output(joined[0], video_path).run()
 
-# convert images from temp_dir to video using ffmpeg
-import subprocess
-subprocess.call(["ffmpeg", "-framerate", "10", "-pattern_type", "glob", "-i", temp_dir + "/*.png", "-c:v", "libx264", "-pix_fmt", "yuv420p", temp_dir + "/output.mp4"])
+# create gif
+gif_path = f"{temp_dir}/output.gif"
+ffmpeg.output(joined[0], gif_path).run()
 
-print(temp_dir + "/output.mp4")
-    
+print(video_path)
+subprocess.run(['open', video_path], check=True)
+
+print(gif_path)
+subprocess.run(['open', gif_path], check=True)
+
+subprocess.run(['open', temp_dir], check=True)
+
 print("done!")
-

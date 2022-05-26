@@ -1,1 +1,3 @@
 replicate==0.0.1a7
+requests==2.27.1
+ffmpeg-python==0.2.0
